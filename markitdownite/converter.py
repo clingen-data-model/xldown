@@ -229,20 +229,15 @@ def _read_sheet_with_unmerged_cells(
                 )
             )
 
-    # Track annotations for cells in the data rectangle
-    annotations: dict[tuple[int, int], CellAnnotation] = {}
-
+    # Fill merged cells first (before formatting, so we have all values)
     for row_idx, row_list in enumerate(data, 1):
         for (
             start_col,
             start_row,
         ), (end_col, end_row), top_left_value, top_left_formatting in merges:
             if start_row <= row_idx <= end_row:
-                # Ensure row is wide enough to accommodate the merge.
                 while len(row_list) < end_col:
                     row_list.append(None)
-
-                # Fill all columns in the merge that are empty in this row.
                 for col in range(start_col, end_col + 1):
                     if row_list[col - 1] is None:
                         formatted_value = top_left_formatting.apply_to(
@@ -250,37 +245,31 @@ def _read_sheet_with_unmerged_cells(
                         )
                         row_list[col - 1] = formatted_value
 
-    # Apply inline formatting to all cells in the data rectangle and track annotations
-    for row_idx, row_list in enumerate(data, 1):
-        for col_idx, value in enumerate(row_list, 1):
-            if row_idx - 1 < len(cell_objects) and col_idx - 1 < len(
-                cell_objects[row_idx - 1]
-            ):
-                cell = cell_objects[row_idx - 1][col_idx - 1]
+    # Apply inline formatting and track annotations only for cells in the data rectangle
+    annotations: dict[tuple[int, int], CellAnnotation] = {}
+    for row_idx in range(first_row_idx, len(data)):
+        row_list = data[row_idx]
+        for col_idx in range(first_col_idx, len(row_list)):
+            value = row_list[col_idx]
+            if row_idx < len(cell_objects) and col_idx < len(cell_objects[row_idx]):
+                cell = cell_objects[row_idx][col_idx]
                 if value is not None:
                     formatting = CellFormatting.from_cell(cell)
                     formatted_value = formatting.apply_to(str(value))
-                    row_list[col_idx - 1] = formatted_value
+                    row_list[col_idx] = formatted_value
 
                 annotation = CellAnnotation.from_cell(cell)
                 if annotation.fg_color or annotation.bg_color or annotation.border:
-                    annotations[(row_idx, col_idx)] = annotation
+                    data_row = row_idx - first_row_idx + 1
+                    data_col = col_idx - first_col_idx + 1
+                    annotations[(data_row, data_col)] = annotation
 
     # Extract data rectangle (trim empty rows and columns)
     header = data[first_row_idx][first_col_idx:]
     data_rows = [row[first_col_idx:] for row in data[first_row_idx + 1:]]
 
-    # Adjust annotation coordinates to data rectangle (1-indexed relative to data)
-    adjusted_annotations = {}
-    for (row, col), annotation in annotations.items():
-        if row > first_row_idx:
-            adjusted_row = row - first_row_idx
-            adjusted_col = col - first_col_idx
-            if adjusted_row > 0 and adjusted_col > 0:
-                adjusted_annotations[(adjusted_row, adjusted_col)] = annotation
-
     # Create DataFrame with first row as header and remaining rows as data
-    return pd.DataFrame(data_rows, columns=header), adjusted_annotations
+    return pd.DataFrame(data_rows, columns=header), annotations
 
 def excel_to_markdown(
     xlsx_path: str | Path,
