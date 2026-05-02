@@ -1,9 +1,11 @@
 from pathlib import Path
 
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.comments import Comment
 from openpyxl.worksheet.hyperlink import Hyperlink
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 
 from markitdownite.converter import excel_to_markdown
 from markitdownite import paths
@@ -148,24 +150,51 @@ def test_all_formatting_types(tmp_path: Path):
     ws["B7"].hyperlink = Hyperlink(ref="B7", target="https://example.com/docs")
     ws["C7"] = 25
 
+    # Cell-level subscript
+    ws["A8"] = "H2O"
+    ws["A8"].font = Font(vertAlign="subscript")
+    ws["B8"] = "Normal"
+    ws["C8"] = 200
+
+    # Character-level rich text subscript (H₂O with only 2 subscript)
+    normal_font = InlineFont()
+    subscript_font = InlineFont(vertAlign="subscript")
+    h2o_rich = CellRichText(
+        TextBlock(normal_font, "H"),
+        TextBlock(subscript_font, "2"),
+        TextBlock(normal_font, "O")
+    )
+    ws["A9"] = "H2O"
+    ws["B9"] = h2o_rich
+    ws["C9"] = 100
+
+    # Rotated text
+    ws["A10"] = "Rotated 90°"
+    ws["A10"].alignment = Alignment(textRotation=90)
+    ws["B10"] = "Normal"
+    ws["C10"] = 300
+
     # Triangle pattern (tests non-rectangular cluster handling)
-    ws["A8"] = "Grace"
-    ws["B8"] = "OK"
-    ws["C8"] = 10
-    ws["A9"] = "left"
-    ws["B9"] = "apex"
-    ws["C9"] = "right"
+    ws["A11"] = "Grace"
+    ws["B11"] = "OK"
+    ws["C11"] = 10
+    ws["A12"] = "left"
+    ws["B12"] = "apex"
+    ws["C12"] = "right"
+
+    # Hide column B (Status) to test hidden column marking
+    ws.column_dimensions['B'].hidden = True
 
     # Apply yellow background to entire Status column (annotation merging test)
     yellow_fill = PatternFill(start_color="FFFFFF00", end_color="FFFFFF00", fill_type="solid")
-    for row in range(1, 8):
+    for row in range(1, 11):
         ws[f"B{row}"].fill = yellow_fill
 
     # Apply blue background to triangle (annotation gap handling test)
     blue_fill = PatternFill(start_color="FF0000FF", end_color="FF0000FF", fill_type="solid")
-    ws["B8"].fill = blue_fill
-    ws["A9"].fill = blue_fill
-    ws["C9"].fill = blue_fill
+    ws["A12"].fill = blue_fill
+    ws["B12"].fill = blue_fill
+    ws["C12"].fill = blue_fill
 
     test_excel = tmp_path / "test.xlsx"
     wb.save(test_excel)
@@ -178,28 +207,28 @@ def test_all_formatting_types(tmp_path: Path):
 
 ## Table
 
-| **Name**    | **Status**   | **Value**   |
-|:------------|:-------------|:------------|
-| **Alice**   | Active       | 100         |
-| *Bob*       | Inactive     | 50          |
-| ~~Charlie~~ | Pending      | 75          |
-| ***Diana*** | Active       | 200         |
-| Eve         | Error        | 0           |
-| Frank       | Warning      | 25          |
-| Grace       | OK           | 10          |
-| left        | apex         | right       |
+| **Name**           | **Status** (hidden)   | **Value**   |
+|:-------------------|:----------------------|:------------|
+| **Alice**          | Active                | 100         |
+| *Bob*              | Inactive              | 50          |
+| ~~Charlie~~        | Pending               | 75          |
+| ***Diana***        | Active                | 200         |
+| Eve                | Error                 | 0           |
+| Frank              | Warning               | 25          |
+| <sub>H2O</sub>     | Normal                | 200         |
+| H2O                | H<sub>2</sub>O        | 100         |
+| Rotated 90° (↻90°) | Normal                | 300         |
+| Grace              | OK                    | 10          |
+| left               | apex                  | right       |
 
 ### Annotations
+*(Cell references are relative to the table above)*
 
-- B1:B7: bg_color=FFFFFF00
+- B1:B10: bg_color=FFFFFF00
 
 - A6: fg_color=FFFF0000
 
-- B8: bg_color=FF0000FF
-
-- A9: bg_color=FF0000FF
-
-- C9: bg_color=FF0000FF
+- A12:C12: bg_color=FF0000FF
 
 - A6: comment: This record needs review
 
