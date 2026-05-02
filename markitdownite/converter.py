@@ -188,18 +188,23 @@ def _read_sheet_with_unmerged_cells(
 
     Returns: (DataFrame, annotations_dict) where annotations_dict maps (row, col) to CellAnnotation.
     """
-    # Build data row by row, tracking cell objects for formatting
+    # Phase 1: Extract raw values and cell objects from worksheet.
+    # We need cell objects (not just values) to access formatting (fonts, colors, borders).
+    # iter_rows(values_only=False) gives us openpyxl Cell objects with full metadata.
+    # data stores plain values (for easier processing), cell_objects stores Cell objects (for formatting).
     data = []
     cell_objects = []
     for row_idx, row in enumerate(ws.iter_rows(values_only=False), 1):
         data.append([cell.value for cell in row])
         cell_objects.append(list(row))
 
-    # Return empty DataFrame and empty annotations if no data
+    # Edge case: empty sheet
     if not data:
         return pd.DataFrame(), {}
 
-    # Find data rectangle bounds (first pass)
+    # Phase 2: Find the data rectangle bounds (first non-empty row and leftmost non-empty column).
+    # Sheets may have empty rows/columns before the table starts (e.g., table at D4).
+    # We scan to find where the actual data begins, then only process that rectangle.
     first_row_idx = 0
     first_col_idx = 0
     for row_idx, row_list in enumerate(data):
@@ -211,7 +216,9 @@ def _read_sheet_with_unmerged_cells(
                     break
             break
 
-    # Process merges (second pass)
+    # Phase 3: Parse and collect all merged cell ranges from the worksheet.
+    # For each merge, extract: range boundaries, top-left value, and top-left formatting.
+    # Formatting is inherited from the top-left cell to all other cells in the merge.
     merges = []
     for merged_range in ws.merged_cells.ranges:
         parsed = _parse_cell_range(merged_range.coord)
@@ -229,15 +236,20 @@ def _read_sheet_with_unmerged_cells(
                 )
             )
 
-    # Fill merged cells first (before formatting, so we have all values)
+    # Phase 4: Fill merged cell ranges with the top-left value and formatting.
+    # When openpyxl reads a merged range, only the top-left cell has a value; others are None.
+    # We replicate the top-left value (with formatting) to all empty cells in the range.
+    # This ensures the DataFrame shows the value in all merged cells, not just the top-left.
     for row_idx, row_list in enumerate(data, 1):
         for (
             start_col,
             start_row,
         ), (end_col, end_row), top_left_value, top_left_formatting in merges:
             if start_row <= row_idx <= end_row:
+                # Ensure the row is wide enough (openpyxl pads rows with None as needed).
                 while len(row_list) < end_col:
                     row_list.append(None)
+                # Fill all empty cells in this row's merge range with the top-left value.
                 for col in range(start_col, end_col + 1):
                     if row_list[col - 1] is None:
                         formatted_value = top_left_formatting.apply_to(
@@ -245,7 +257,11 @@ def _read_sheet_with_unmerged_cells(
                         )
                         row_list[col - 1] = formatted_value
 
-    # Apply inline formatting and track annotations only for cells in the data rectangle
+    # Phase 5: Apply inline formatting and collect annotations for cells in the data rectangle.
+    # Only process cells that are actually in the final output (from first_row_idx/first_col_idx onwards).
+    # Inline formatting (bold, italic, strikethrough) is applied directly to cell values.
+    # Annotations (colors, borders) are collected separately for the annotations section.
+    # Annotation coordinates are 1-indexed relative to the data rectangle (A1 = 1,1).
     annotations: dict[tuple[int, int], CellAnnotation] = {}
     for row_idx in range(first_row_idx, len(data)):
         row_list = data[row_idx]
@@ -253,22 +269,27 @@ def _read_sheet_with_unmerged_cells(
             value = row_list[col_idx]
             if row_idx < len(cell_objects) and col_idx < len(cell_objects[row_idx]):
                 cell = cell_objects[row_idx][col_idx]
+                # Apply inline Markdown formatting (bold, italic, strikethrough) if the cell has it.
                 if value is not None:
                     formatting = CellFormatting.from_cell(cell)
                     formatted_value = formatting.apply_to(str(value))
                     row_list[col_idx] = formatted_value
 
+                # Track annotations (colors, borders) for cells that have them.
                 annotation = CellAnnotation.from_cell(cell)
                 if annotation.fg_color or annotation.bg_color or annotation.border:
                     data_row = row_idx - first_row_idx + 1
                     data_col = col_idx - first_col_idx + 1
                     annotations[(data_row, data_col)] = annotation
 
-    # Extract data rectangle (trim empty rows and columns)
+    # Phase 6: Extract the final data rectangle and create the DataFrame.
+    # header: first row of the data rectangle (becomes column names in the DataFrame).
+    # data_rows: all rows after the header (becomes the data in the DataFrame).
+    # Slicing with [first_col_idx:] removes any leading empty columns.
     header = data[first_row_idx][first_col_idx:]
     data_rows = [row[first_col_idx:] for row in data[first_row_idx + 1:]]
 
-    # Create DataFrame with first row as header and remaining rows as data
+    # Create and return the DataFrame with the first row as headers.
     return pd.DataFrame(data_rows, columns=header), annotations
 
 def excel_to_markdown(
