@@ -1,5 +1,6 @@
 from pathlib import Path
 from collections import defaultdict
+from typing import Literal
 
 from markitdownite import paths
 from markitdownite.charts import render_chart
@@ -85,38 +86,7 @@ class CellMetadata(BaseModel):
     link: str | None = None
 
     @classmethod
-    def from_cell(cls, cell: Cell) -> "CellAnnotation":
-        """Extract formatting annotations (colors, borders) from a cell."""
-        font = cell.font or {}
-        fill = cell.fill or {}
-        border = cell.border or {}
-
-        fg_color = None
-        if font.color and hasattr(font.color, "type") and font.color.type == "rgb":
-            rgb = font.color.rgb
-            if rgb and isinstance(rgb, str) and rgb not in ("00000000", "FFFFFFFF"):
-                fg_color = rgb
-
-        bg_color = None
-        if fill.start_color and hasattr(fill.start_color, "type") and fill.start_color.type == "rgb":
-            rgb = fill.start_color.rgb
-            if rgb and isinstance(rgb, str) and rgb not in ("00000000", "FFFFFFFF"):
-                bg_color = rgb
-
-        border_style = None
-        if border.left and border.left.style:
-            border_style = border.left.style
-
-        return cls(
-            fg_color=fg_color,
-            bg_color=bg_color,
-            border=border_style,
-        )
-
-
-class _CellMetadataExtractor:
-    @staticmethod
-    def from_cell(cell: Cell) -> CellMetadata:
+    def from_cell(cls, cell: Cell) -> "CellMetadata":
         """Extract metadata (comments, links) from a cell."""
         comment_text = None
         if cell.comment:
@@ -126,7 +96,7 @@ class _CellMetadataExtractor:
         if cell.hyperlink:
             link_url = cell.hyperlink.target if cell.hyperlink.target else None
 
-        return CellMetadata(comment=comment_text, link=link_url)
+        return cls(comment=comment_text, link=link_url)
 
 
 def extract_images(workbook, output_dir: Path) -> dict:
@@ -249,48 +219,109 @@ def _parse_cell_range(range_str: str) -> tuple:
     return ((start_col, start_row), (end_col, end_row))
 
 
+class SheetRegion(BaseModel):
+    """A connected component of non-empty cells on a sheet.
+
+    All coordinates are 0-indexed into the data list.
+    kind is "prose" for single isolated cells, "table" for multi-cell regions.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["prose", "table"]
+    min_row: int
+    max_row: int
+    min_col: int
+    max_col: int
+    cells: set[tuple[int, int]]
+
+
+def _find_cell_regions(data: list[list]) -> list[SheetRegion]:
+    """Detect connected components of non-empty cells using Union Find.
+
+    Each region is a group of adjacent non-empty cells (4-connected: horizontal/vertical).
+    Single isolated cells are marked as "prose"; multi-cell regions are marked as "table".
+
+    Returns a list of SheetRegion objects sorted by (min_row, min_col).
+    """
+    occupied = {(r, c) for r, row in enumerate(data) for c, val in enumerate(row) if val is not None}
+    if not occupied:
+        return []
+
+    parent: dict[tuple[int, int], tuple[int, int]] = {}
+
+    def find(x: tuple[int, int]) -> tuple[int, int]:
+        root = x
+        while parent.get(root, root) != root:
+            root = parent[root]
+        # Path compression: point all nodes on the path directly to root
+        while parent.get(x, x) != root:
+            parent[x], x = root, parent[x]
+        return root
+
+    def union(a: tuple[int, int], b: tuple[int, int]) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    # Union adjacent occupied cells
+    for r, c in occupied:
+        if (r + 1, c) in occupied:
+            union((r, c), (r + 1, c))
+        if (r, c + 1) in occupied:
+            union((r, c), (r, c + 1))
+
+    # Group cells by root (connected component)
+    components: dict[tuple[int, int], set[tuple[int, int]]] = defaultdict(set)
+    for cell in occupied:
+        components[find(cell)].add(cell)
+
+    # Build SheetRegion objects
+    regions = []
+    for cells in components.values():
+        min_row = min(r for r, c in cells)
+        max_row = max(r for r, c in cells)
+        min_col = min(c for r, c in cells)
+        max_col = max(c for r, c in cells)
+        kind: Literal["prose", "table"] = "prose" if len(cells) == 1 else "table"
+        regions.append(SheetRegion(
+            kind=kind,
+            min_row=min_row,
+            max_row=max_row,
+            min_col=min_col,
+            max_col=max_col,
+            cells=cells,
+        ))
+
+    # Sort by position (top-to-bottom, left-to-right)
+    regions.sort(key=lambda r: (r.min_row, r.min_col))
+    return regions
+
+
 def _read_sheet_with_unmerged_cells(
     xlsx_path: Path, sheet_name: str, ws
-) -> tuple[pd.DataFrame, dict[tuple[int, int], CellAnnotation], dict[tuple[int, int], CellMetadata]]:
-    """Read Excel sheet into DataFrame, filling merged cells, and track annotations and metadata.
+) -> list[tuple[Literal["prose", "table"], pd.DataFrame | str, dict[tuple[int, int], CellAnnotation], dict[tuple[int, int], CellMetadata]]]:
+    """Read Excel sheet, detect non-contiguous table regions, and return per-region DataFrames/prose.
 
-    openpyxl is used directly instead of pandas to handle merged cells properly.
-    Merged cells that are empty (except top-left) are filled with the top-left value.
+    Uses Union Find to detect connected components of non-empty cells. Each component is either:
+    - A single isolated cell → emitted as prose (plain text)
+    - A multi-cell region → emitted as a table (first row = headers)
 
-    Returns: (DataFrame, annotations_dict, metadata_dict) where annotations_dict maps (row, col) to CellAnnotation
-    and metadata_dict maps (row, col) to CellMetadata.
+    Returns list of tuples: (kind, content, annotations, metadata) where:
+    - kind: "prose" or "table"
+    - content: str for prose, pd.DataFrame for table
+    - annotations/metadata: dicts with 1-indexed coordinates relative to that region
     """
     # Phase 1: Extract raw values and cell objects from worksheet.
-    # We need cell objects (not just values) to access formatting (fonts, colors, borders).
-    # iter_rows(values_only=False) gives us openpyxl Cell objects with full metadata.
-    # data stores plain values (for easier processing), cell_objects stores Cell objects (for formatting).
     data = []
     cell_objects = []
     for row_idx, row in enumerate(ws.iter_rows(values_only=False), 1):
         data.append([cell.value for cell in row])
         cell_objects.append(list(row))
 
-    # Edge case: empty sheet
     if not data:
-        return pd.DataFrame(), {}, {}
+        return []
 
-    # Phase 2: Find the data rectangle bounds (first non-empty row and leftmost non-empty column).
-    # Sheets may have empty rows/columns before the table starts (e.g., table at D4).
-    # We scan to find where the actual data begins, then only process that rectangle.
-    first_row_idx = 0
-    first_col_idx = 0
-    for row_idx, row_list in enumerate(data):
-        if any(cell is not None for cell in row_list):
-            first_row_idx = row_idx
-            for col_idx, cell in enumerate(row_list):
-                if cell is not None:
-                    first_col_idx = col_idx
-                    break
-            break
-
-    # Phase 3: Parse and collect all merged cell ranges from the worksheet.
-    # For each merge, extract: range boundaries, top-left value, and top-left formatting.
-    # Formatting is inherited from the top-left cell to all other cells in the merge.
+    # Phase 2: Parse and collect all merged cell ranges.
     merges = []
     for merged_range in ws.merged_cells.ranges:
         parsed = _parse_cell_range(merged_range.coord)
@@ -308,20 +339,15 @@ def _read_sheet_with_unmerged_cells(
                 )
             )
 
-    # Phase 4: Fill merged cell ranges with the top-left value and formatting.
-    # When openpyxl reads a merged range, only the top-left cell has a value; others are None.
-    # We replicate the top-left value (with formatting) to all empty cells in the range.
-    # This ensures the DataFrame shows the value in all merged cells, not just the top-left.
+    # Phase 3: Fill merged cell ranges with the top-left value and formatting.
     for row_idx, row_list in enumerate(data, 1):
         for (
             start_col,
             start_row,
         ), (end_col, end_row), top_left_value, top_left_formatting in merges:
             if start_row <= row_idx <= end_row:
-                # Ensure the row is wide enough (openpyxl pads rows with None as needed).
                 while len(row_list) < end_col:
                     row_list.append(None)
-                # Fill all empty cells in this row's merge range with the top-left value.
                 for col in range(start_col, end_col + 1):
                     if row_list[col - 1] is None:
                         formatted_value = top_left_formatting.apply_to(
@@ -329,48 +355,73 @@ def _read_sheet_with_unmerged_cells(
                         )
                         row_list[col - 1] = formatted_value
 
-    # Phase 5: Apply inline formatting and collect annotations and metadata for cells in the data rectangle.
-    # Only process cells that are actually in the final output (from first_row_idx/first_col_idx onwards).
-    # Inline formatting (bold, italic, strikethrough) is applied directly to cell values.
-    # Annotations (colors, borders) and metadata (comments, links) are collected separately.
-    # Coordinates are 1-indexed relative to the data rectangle (A1 = 1,1).
-    annotations: dict[tuple[int, int], CellAnnotation] = {}
-    metadata: dict[tuple[int, int], CellMetadata] = {}
-    for row_idx in range(first_row_idx, len(data)):
-        row_list = data[row_idx]
-        for col_idx in range(first_col_idx, len(row_list)):
-            value = row_list[col_idx]
-            if row_idx < len(cell_objects) and col_idx < len(cell_objects[row_idx]):
-                cell = cell_objects[row_idx][col_idx]
-                # Apply inline Markdown formatting (bold, italic, strikethrough) if the cell has it.
-                if value is not None:
-                    formatting = CellFormatting.from_cell(cell)
-                    formatted_value = formatting.apply_to(str(value))
-                    row_list[col_idx] = formatted_value
+    # Phase 4: Detect non-contiguous regions using Union Find.
+    regions = _find_cell_regions(data)
+    if not regions:
+        return []
 
-                # Track annotations (colors, borders) for cells that have them.
-                annotation = CellAnnotation.from_cell(cell)
-                if annotation.fg_color or annotation.bg_color or annotation.border:
-                    data_row = row_idx - first_row_idx + 1
-                    data_col = col_idx - first_col_idx + 1
-                    annotations[(data_row, data_col)] = annotation
+    # Phase 5: Process each region.
+    results = []
+    for region in regions:
+        if region.kind == "prose":
+            # Single isolated cell: extract and emit as plain text
+            r, c = next(iter(region.cells))
+            prose_value = data[r][c]
+            prose_text = str(prose_value) if prose_value is not None else ""
+            results.append(("prose", prose_text, {}, {}))
+            continue
 
-                # Track metadata (comments, links) for cells that have them.
-                cell_metadata = _CellMetadataExtractor.from_cell(cell)
-                if cell_metadata.comment or cell_metadata.link:
-                    data_row = row_idx - first_row_idx + 1
-                    data_col = col_idx - first_col_idx + 1
-                    metadata[(data_row, data_col)] = cell_metadata
+        # Table region: apply formatting, collect annotations/metadata, create DataFrame
+        first_row_idx = region.min_row
+        first_col_idx = region.min_col
+        last_row_idx = region.max_row
+        last_col_idx = region.max_col
 
-    # Phase 6: Extract the final data rectangle and create the DataFrame.
-    # header: first row of the data rectangle (becomes column names in the DataFrame).
-    # data_rows: all rows after the header (becomes the data in the DataFrame).
-    # Slicing with [first_col_idx:] removes any leading empty columns.
-    header = data[first_row_idx][first_col_idx:]
-    data_rows = [row[first_col_idx:] for row in data[first_row_idx + 1:]]
+        annotations: dict[tuple[int, int], CellAnnotation] = {}
+        metadata: dict[tuple[int, int], CellMetadata] = {}
 
-    # Create and return the DataFrame with the first row as headers.
-    return pd.DataFrame(data_rows, columns=header), annotations, metadata
+        # Apply inline formatting and collect annotations/metadata
+        for row_idx in range(first_row_idx, last_row_idx + 1):
+            row_list = data[row_idx]
+            for col_idx in range(first_col_idx, last_col_idx + 1):
+                if col_idx < len(row_list):
+                    value = row_list[col_idx]
+                    if row_idx < len(cell_objects) and col_idx < len(cell_objects[row_idx]):
+                        cell = cell_objects[row_idx][col_idx]
+                        # Apply inline Markdown formatting
+                        if value is not None:
+                            formatting = CellFormatting.from_cell(cell)
+                            formatted_value = formatting.apply_to(str(value))
+                            row_list[col_idx] = formatted_value
+
+                        # Track annotations and metadata
+                        annotation = CellAnnotation.from_cell(cell)
+                        if annotation.fg_color or annotation.bg_color or annotation.border:
+                            data_row = row_idx - first_row_idx + 1
+                            data_col = col_idx - first_col_idx + 1
+                            annotations[(data_row, data_col)] = annotation
+
+                        cell_metadata = CellMetadata.from_cell(cell)
+                        if cell_metadata.comment or cell_metadata.link:
+                            data_row = row_idx - first_row_idx + 1
+                            data_col = col_idx - first_col_idx + 1
+                            metadata[(data_row, data_col)] = cell_metadata
+
+        # Extract header (first row) and data rows
+        header = data[first_row_idx][first_col_idx : last_col_idx + 1]
+        data_rows = [
+            row[first_col_idx : last_col_idx + 1]
+            for row in data[first_row_idx + 1 : last_row_idx + 1]
+        ]
+
+        # Pad rows to header width
+        width = len(header)
+        data_rows = [r + [None] * (width - len(r)) for r in data_rows]
+
+        df = pd.DataFrame(data_rows, columns=header)
+        results.append(("table", df, annotations, metadata))
+
+    return results
 
 def excel_to_markdown(
     xlsx_path: str | Path,
@@ -409,41 +460,53 @@ def excel_to_markdown(
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        df, annotations, metadata = _read_sheet_with_unmerged_cells(xlsx_path, sheet_name, ws)
+        regions = _read_sheet_with_unmerged_cells(xlsx_path, sheet_name, ws)
 
         md_parts.append(f"# {sheet_name}\n")
 
-        md_parts.append("## Table\n")
-        md_parts.append(df.to_markdown(index=False))
-        md_parts.append("\n")
+        # Precompute number of table regions for heading logic
+        tables_in_sheet = sum(1 for kind, *_ in regions if kind == "table")
+        table_counter = 0
 
-        if annotations or metadata:
-            merged_ranges = _merge_cell_ranges(annotations) if annotations else []
-            md_parts.append("### Annotations\n")
-            for range_str, annotation in merged_ranges:
-                parts = []
-                if annotation.fg_color:
-                    parts.append(f"fg_color={annotation.fg_color}")
-                if annotation.bg_color:
-                    parts.append(f"bg_color={annotation.bg_color}")
-                if annotation.border:
-                    parts.append(f"border={annotation.border}")
-                if parts:
-                    md_parts.append(f"- {range_str}: {' '.join(parts)}\n")
+        # Process each region (prose or table)
+        for kind, content, annotations, metadata in regions:
+            if kind == "prose":
+                md_parts.append(f"{content}\n")
+                continue
 
-            # Add metadata for cells (comments and links)
-            for (row, col), cell_metadata in sorted(metadata.items()):
-                cell_addr = f"{get_column_letter(col)}{row}"
-                parts = []
-                if cell_metadata.comment:
-                    parts.append(f"comment: {cell_metadata.comment}")
-                if cell_metadata.link:
-                    parts.append(f"link: {cell_metadata.link}")
-                if parts:
-                    md_parts.append(f"- {cell_addr}: {' '.join(parts)}\n")
+            # Table region
+            table_counter += 1
+            heading = f"## Table {table_counter}" if tables_in_sheet > 1 else "## Table"
+            md_parts.append(f"{heading}\n")
+            md_parts.append(f"{content.to_markdown(index=False)}\n")
 
-            if merged_ranges or metadata:
-                md_parts.append("\n")
+            if annotations or metadata:
+                merged_ranges = _merge_cell_ranges(annotations) if annotations else []
+                md_parts.append("### Annotations\n")
+                for range_str, annotation in merged_ranges:
+                    parts = []
+                    if annotation.fg_color:
+                        parts.append(f"fg_color={annotation.fg_color}")
+                    if annotation.bg_color:
+                        parts.append(f"bg_color={annotation.bg_color}")
+                    if annotation.border:
+                        parts.append(f"border={annotation.border}")
+                    if parts:
+                        md_parts.append(f"- {range_str}: {' '.join(parts)}\n")
+
+                # Add metadata for cells (comments and links)
+                for (row, col), cell_metadata in sorted(metadata.items()):
+                    cell_addr = f"{get_column_letter(col)}{row}"
+                    parts = []
+                    if cell_metadata.comment:
+                        parts.append(f"comment: {cell_metadata.comment}")
+                    if cell_metadata.link:
+                        parts.append(f"link: {cell_metadata.link}")
+                    if parts:
+                        md_parts.append(f"- {cell_addr}: {' '.join(parts)}\n")
+
+                if merged_ranges or metadata:
+                    md_parts.append("\n")
 
         for chart in getattr(ws, "_charts", []):
             chart_path = paths.chart_path(output_dir, chart_counter)
@@ -455,4 +518,7 @@ def excel_to_markdown(
             img_path = paths.image_path(output_dir, img_idx)
             md_parts.append(f"![Image]({img_path})\n")
 
-    paths.output_file_path(output_dir).write_text("\n".join(md_parts))
+    output_text = "\n".join(md_parts)
+    if output_text:
+        output_text = output_text.rstrip('\n') + '\n\n'
+    paths.output_file_path(output_dir).write_text(output_text)

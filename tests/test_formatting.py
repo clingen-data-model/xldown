@@ -35,14 +35,14 @@ def test_prose_before_table(tmp_path: Path):
     content = paths.output_file_path(output_dir).read_text()
     expected = """# WithProse
 
+All values are in TPM units.
+
 ## Table
 
-| All values are in TPM units.   | nan        |
-|:-------------------------------|:-----------|
-| nan                            | nan        |
-| Gene                           | Expression |
-| BRCA1                          | 1234       |
-| TP53                           | 5678       |
+| Gene   |   Expression |
+|:-------|-------------:|
+| BRCA1  |         1234 |
+| TP53   |         5678 |
 
 """
     assert content == expected
@@ -79,16 +79,19 @@ def test_multiple_tables_same_sheet(tmp_path: Path):
     content = paths.output_file_path(output_dir).read_text()
     expected = """# MultipleTables
 
-## Table
+## Table 1
 
-| Name    | Score   |
-|:--------|:--------|
-| Alice   | 95      |
-| Bob     | 87      |
-| nan     | nan     |
-| Product | Price   |
-| Apple   | 1.5     |
-| Banana  | 0.75    |
+| Name   |   Score |
+|:-------|--------:|
+| Alice  |      95 |
+| Bob    |      87 |
+
+## Table 2
+
+| Product   |   Price |
+|:----------|--------:|
+| Apple     |    1.5  |
+| Banana    |    0.75 |
 
 """
     assert content == expected
@@ -186,7 +189,6 @@ def test_all_formatting_types(tmp_path: Path):
 | Grace       | OK           | 10          |
 | left        | apex         | right       |
 
-
 ### Annotations
 
 - B1:B7: bg_color=FFFFFF00
@@ -203,6 +205,122 @@ def test_all_formatting_types(tmp_path: Path):
 
 - B7: link: https://example.com/docs
 
+"""
+    assert content == expected
+
+
+def test_isolated_cell_as_prose(tmp_path: Path):
+    """Verify a single isolated cell is emitted as prose, not a table."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "OnlyProse"
+    ws["C3"] = "Note: values are provisional"
+
+    test_excel = tmp_path / "test.xlsx"
+    wb.save(test_excel)
+
+    output_dir = tmp_path / "output"
+    excel_to_markdown(test_excel, output_dir)
+
+    content = paths.output_file_path(output_dir).read_text()
+    expected = """# OnlyProse
+
+Note: values are provisional
+
+"""
+    assert content == expected
+
+
+def test_tables_side_by_side(tmp_path: Path):
+    """Verify two tables separated by an empty column produce separate table sections."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "SideBySide"
+
+    # First table at A1:B3
+    ws["A1"] = "Name"
+    ws["B1"] = "Score"
+    ws["A2"] = "Alice"
+    ws["B2"] = 95
+    ws["A3"] = "Bob"
+    ws["B3"] = 87
+
+    # Column C is empty (the gap)
+    # Second table at D1:E3
+    ws["D1"] = "Product"
+    ws["E1"] = "Price"
+    ws["D2"] = "Apple"
+    ws["E2"] = 1.50
+    ws["D3"] = "Banana"
+    ws["E3"] = 0.75
+
+    test_excel = tmp_path / "test.xlsx"
+    wb.save(test_excel)
+
+    output_dir = tmp_path / "output"
+    excel_to_markdown(test_excel, output_dir)
+
+    content = paths.output_file_path(output_dir).read_text()
+    expected = """# SideBySide
+
+## Table 1
+
+| Name   |   Score |
+|:-------|--------:|
+| Alice  |      95 |
+| Bob    |      87 |
+
+## Table 2
+
+| Product   |   Price |
+|:----------|--------:|
+| Apple     |    1.5  |
+| Banana    |    0.75 |
+
+"""
+    assert content == expected
+
+
+def test_prose_between_tables(tmp_path: Path):
+    """Verify prose cells between tables are emitted as prose (single table region still uses ## Table)."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "ProseTableProse"
+
+    # Prose at A1
+    ws["A1"] = "Introduction text"
+
+    # Table at A3:B5
+    ws["A3"] = "Item"
+    ws["B3"] = "Count"
+    ws["A4"] = "Apple"
+    ws["B4"] = 5
+    ws["A5"] = "Orange"
+    ws["B5"] = 3
+
+    # Prose at A7
+    ws["A7"] = "Footer note"
+
+    test_excel = tmp_path / "test.xlsx"
+    wb.save(test_excel)
+
+    output_dir = tmp_path / "output"
+    excel_to_markdown(test_excel, output_dir)
+
+    content = paths.output_file_path(output_dir).read_text()
+    # Single table → ## Table (not numbered)
+    expected = """# ProseTableProse
+
+Introduction text
+
+## Table
+
+| Item   |   Count |
+|:-------|--------:|
+| Apple  |       5 |
+| Orange |       3 |
+
+Footer note
 
 """
     assert content == expected
