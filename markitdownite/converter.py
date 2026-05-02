@@ -1,4 +1,5 @@
 from pathlib import Path
+from collections import defaultdict
 
 from markitdownite import paths
 from markitdownite.charts import render_chart
@@ -6,7 +7,7 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.cell.cell import Cell
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 import re
 
 
@@ -42,6 +43,8 @@ class CellFormatting(BaseModel):
 
 
 class CellAnnotation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     fg_color: str | None = None
     bg_color: str | None = None
     border: str | None = None
@@ -49,7 +52,7 @@ class CellAnnotation(BaseModel):
 
     @classmethod
     def from_cell(cls, cell: Cell) -> "CellAnnotation":
-        """Extract annotation metadata (colors, borders) from a cell."""
+        """Extract formatting annotations (colors, borders) from a cell."""
         font = cell.font or {}
         fill = cell.fill or {}
         border = cell.border or {}
@@ -75,6 +78,55 @@ class CellAnnotation(BaseModel):
             bg_color=bg_color,
             border=border_style,
         )
+
+
+class CellMetadata(BaseModel):
+    comment: str | None = None
+    link: str | None = None
+
+    @classmethod
+    def from_cell(cls, cell: Cell) -> "CellAnnotation":
+        """Extract formatting annotations (colors, borders) from a cell."""
+        font = cell.font or {}
+        fill = cell.fill or {}
+        border = cell.border or {}
+
+        fg_color = None
+        if font.color and hasattr(font.color, "type") and font.color.type == "rgb":
+            rgb = font.color.rgb
+            if rgb and isinstance(rgb, str) and rgb not in ("00000000", "FFFFFFFF"):
+                fg_color = rgb
+
+        bg_color = None
+        if fill.start_color and hasattr(fill.start_color, "type") and fill.start_color.type == "rgb":
+            rgb = fill.start_color.rgb
+            if rgb and isinstance(rgb, str) and rgb not in ("00000000", "FFFFFFFF"):
+                bg_color = rgb
+
+        border_style = None
+        if border.left and border.left.style:
+            border_style = border.left.style
+
+        return cls(
+            fg_color=fg_color,
+            bg_color=bg_color,
+            border=border_style,
+        )
+
+
+class _CellMetadataExtractor:
+    @staticmethod
+    def from_cell(cell: Cell) -> CellMetadata:
+        """Extract metadata (comments, links) from a cell."""
+        comment_text = None
+        if cell.comment:
+            comment_text = str(cell.comment.text).strip() if cell.comment.text else None
+
+        link_url = None
+        if cell.hyperlink:
+            link_url = cell.hyperlink.target if cell.hyperlink.target else None
+
+        return CellMetadata(comment=comment_text, link=link_url)
 
 
 def extract_images(workbook, output_dir: Path) -> dict:
@@ -104,58 +156,77 @@ def extract_images(workbook, output_dir: Path) -> dict:
 def _merge_cell_ranges(
     annotations: dict[tuple[int, int], CellAnnotation],
 ) -> list[tuple[str, CellAnnotation]]:
-    """Merge contiguous cells with identical annotations into ranges.
+    """Merge adjacent cells with identical annotations into connected components.
 
-    Returns list of (range_str, annotation) tuples, e.g., [('A1:C3', annotation), ...]
+    Uses flood-fill to group cells that share the same annotation and are adjacent
+    (horizontally or vertically). Each component is represented as its bounding box.
+
+    Returns list of (range_str, annotation) tuples, sorted by position.
     """
     if not annotations:
         return []
 
+    # Group cells by annotation
+    cells_by_annotation = defaultdict(set)
+    for pos, annotation in annotations.items():
+        cells_by_annotation[annotation].add(pos)
+
     ranges = []
-    sorted_cells = sorted(annotations.items(), key=lambda x: (x[0][0], x[0][1]))
+    for annotation, cells in cells_by_annotation.items():
+        visited = set()
+        for start_pos in cells:
+            if start_pos in visited:
+                continue
 
-    current_range_start = None
-    current_range_end = None
-    current_annotation = None
+            # Flood-fill to find all connected neighbors
+            cluster = {start_pos}
+            stack = [start_pos]
+            while stack:
+                pos = stack.pop()
+                row, col = pos
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    neighbor = (row + dr, col + dc)
+                    if neighbor in cells and neighbor not in visited:
+                        visited.add(neighbor)
+                        cluster.add(neighbor)
+                        stack.append(neighbor)
 
-    for (row, col), annotation in sorted_cells:
-        if current_annotation is None:
-            current_range_start = (row, col)
-            current_range_end = (row, col)
-            current_annotation = annotation
-        elif (
-            annotation == current_annotation
-            and row == current_range_end[0]
-            and col == current_range_end[1] + 1
-        ):
-            current_range_end = (row, col)
-        elif (
-            annotation == current_annotation
-            and row == current_range_end[0] + 1
-            and col == current_range_start[1]
-        ):
-            current_range_end = (row, col)
-        else:
-            start_addr = f"{get_column_letter(current_range_start[1])}{current_range_start[0]}"
-            if current_range_start == current_range_end:
-                range_str = start_addr
+            visited.add(start_pos)
+
+            # Find bounding box for this cluster
+            min_row = max_row = min_col = max_col = None
+            for row, col in cluster:
+                if min_row is None:
+                    min_row = max_row = row
+                    min_col = max_col = col
+                else:
+                    min_row = min(min_row, row)
+                    max_row = max(max_row, row)
+                    min_col = min(min_col, col)
+                    max_col = max(max_col, col)
+
+            # If cluster fills its bounding box (solid rectangle), use range; otherwise list individual cells
+            cluster_area = len(cluster)
+            bbox_area = (max_row - min_row + 1) * (max_col - min_col + 1)
+
+            if cluster_area == bbox_area:
+                # Solid rectangle, use range
+                start_addr = f"{get_column_letter(min_col)}{min_row}"
+                if min_row == max_row and min_col == max_col:
+                    range_str = start_addr
+                else:
+                    end_addr = f"{get_column_letter(max_col)}{max_row}"
+                    range_str = f"{start_addr}:{end_addr}"
+                ranges.append((range_str, annotation))
             else:
-                end_addr = f"{get_column_letter(current_range_end[1])}{current_range_end[0]}"
-                range_str = f"{start_addr}:{end_addr}"
-            ranges.append((range_str, current_annotation))
-            current_range_start = (row, col)
-            current_range_end = (row, col)
-            current_annotation = annotation
+                # Has gaps (e.g., cross pattern), list individual cells
+                for pos in sorted(cluster):
+                    row, col = pos
+                    cell_addr = f"{get_column_letter(col)}{row}"
+                    ranges.append((cell_addr, annotation))
 
-    if current_range_start is not None:
-        start_addr = f"{get_column_letter(current_range_start[1])}{current_range_start[0]}"
-        if current_range_start == current_range_end:
-            range_str = start_addr
-        else:
-            end_addr = f"{get_column_letter(current_range_end[1])}{current_range_end[0]}"
-            range_str = f"{start_addr}:{end_addr}"
-        ranges.append((range_str, current_annotation))
-
+    # Sort by position
+    ranges.sort(key=lambda x: (int(re.search(r'\d+', x[0]).group()), x[0]))
     return ranges
 
 
@@ -180,13 +251,14 @@ def _parse_cell_range(range_str: str) -> tuple:
 
 def _read_sheet_with_unmerged_cells(
     xlsx_path: Path, sheet_name: str, ws
-) -> tuple[pd.DataFrame, dict[tuple[int, int], CellAnnotation]]:
-    """Read Excel sheet into DataFrame, filling merged cells, and track annotations.
+) -> tuple[pd.DataFrame, dict[tuple[int, int], CellAnnotation], dict[tuple[int, int], CellMetadata]]:
+    """Read Excel sheet into DataFrame, filling merged cells, and track annotations and metadata.
 
     openpyxl is used directly instead of pandas to handle merged cells properly.
     Merged cells that are empty (except top-left) are filled with the top-left value.
 
-    Returns: (DataFrame, annotations_dict) where annotations_dict maps (row, col) to CellAnnotation.
+    Returns: (DataFrame, annotations_dict, metadata_dict) where annotations_dict maps (row, col) to CellAnnotation
+    and metadata_dict maps (row, col) to CellMetadata.
     """
     # Phase 1: Extract raw values and cell objects from worksheet.
     # We need cell objects (not just values) to access formatting (fonts, colors, borders).
@@ -200,7 +272,7 @@ def _read_sheet_with_unmerged_cells(
 
     # Edge case: empty sheet
     if not data:
-        return pd.DataFrame(), {}
+        return pd.DataFrame(), {}, {}
 
     # Phase 2: Find the data rectangle bounds (first non-empty row and leftmost non-empty column).
     # Sheets may have empty rows/columns before the table starts (e.g., table at D4).
@@ -257,12 +329,13 @@ def _read_sheet_with_unmerged_cells(
                         )
                         row_list[col - 1] = formatted_value
 
-    # Phase 5: Apply inline formatting and collect annotations for cells in the data rectangle.
+    # Phase 5: Apply inline formatting and collect annotations and metadata for cells in the data rectangle.
     # Only process cells that are actually in the final output (from first_row_idx/first_col_idx onwards).
     # Inline formatting (bold, italic, strikethrough) is applied directly to cell values.
-    # Annotations (colors, borders) are collected separately for the annotations section.
-    # Annotation coordinates are 1-indexed relative to the data rectangle (A1 = 1,1).
+    # Annotations (colors, borders) and metadata (comments, links) are collected separately.
+    # Coordinates are 1-indexed relative to the data rectangle (A1 = 1,1).
     annotations: dict[tuple[int, int], CellAnnotation] = {}
+    metadata: dict[tuple[int, int], CellMetadata] = {}
     for row_idx in range(first_row_idx, len(data)):
         row_list = data[row_idx]
         for col_idx in range(first_col_idx, len(row_list)):
@@ -282,6 +355,13 @@ def _read_sheet_with_unmerged_cells(
                     data_col = col_idx - first_col_idx + 1
                     annotations[(data_row, data_col)] = annotation
 
+                # Track metadata (comments, links) for cells that have them.
+                cell_metadata = _CellMetadataExtractor.from_cell(cell)
+                if cell_metadata.comment or cell_metadata.link:
+                    data_row = row_idx - first_row_idx + 1
+                    data_col = col_idx - first_col_idx + 1
+                    metadata[(data_row, data_col)] = cell_metadata
+
     # Phase 6: Extract the final data rectangle and create the DataFrame.
     # header: first row of the data rectangle (becomes column names in the DataFrame).
     # data_rows: all rows after the header (becomes the data in the DataFrame).
@@ -290,7 +370,7 @@ def _read_sheet_with_unmerged_cells(
     data_rows = [row[first_col_idx:] for row in data[first_row_idx + 1:]]
 
     # Create and return the DataFrame with the first row as headers.
-    return pd.DataFrame(data_rows, columns=header), annotations
+    return pd.DataFrame(data_rows, columns=header), annotations, metadata
 
 def excel_to_markdown(
     xlsx_path: str | Path,
@@ -329,7 +409,7 @@ def excel_to_markdown(
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        df, annotations = _read_sheet_with_unmerged_cells(xlsx_path, sheet_name, ws)
+        df, annotations, metadata = _read_sheet_with_unmerged_cells(xlsx_path, sheet_name, ws)
 
         md_parts.append(f"# {sheet_name}\n")
 
@@ -337,8 +417,8 @@ def excel_to_markdown(
         md_parts.append(df.to_markdown(index=False))
         md_parts.append("\n")
 
-        if annotations:
-            merged_ranges = _merge_cell_ranges(annotations)
+        if annotations or metadata:
+            merged_ranges = _merge_cell_ranges(annotations) if annotations else []
             md_parts.append("### Annotations\n")
             for range_str, annotation in merged_ranges:
                 parts = []
@@ -350,7 +430,20 @@ def excel_to_markdown(
                     parts.append(f"border={annotation.border}")
                 if parts:
                     md_parts.append(f"- {range_str}: {' '.join(parts)}\n")
-            md_parts.append("\n")
+
+            # Add metadata for cells (comments and links)
+            for (row, col), cell_metadata in sorted(metadata.items()):
+                cell_addr = f"{get_column_letter(col)}{row}"
+                parts = []
+                if cell_metadata.comment:
+                    parts.append(f"comment: {cell_metadata.comment}")
+                if cell_metadata.link:
+                    parts.append(f"link: {cell_metadata.link}")
+                if parts:
+                    md_parts.append(f"- {cell_addr}: {' '.join(parts)}\n")
+
+            if merged_ranges or metadata:
+                md_parts.append("\n")
 
         for chart in getattr(ws, "_charts", []):
             chart_path = paths.chart_path(output_dir, chart_counter)

@@ -296,6 +296,7 @@ def make_stock():
     chart.hiLowLines = ChartLines()
 
     # Excel bug workaround: add dummy cache so hiLowLines display
+    # Note from bpb: https://openpyxl.readthedocs.io/en/3.1.2/charts/stock.html
     pts = [NumVal(idx=i) for i in range(len(data) - 1)]
     cache = NumData(pt=pts)
     chart.series[-1].val.numRef.numCache = cache

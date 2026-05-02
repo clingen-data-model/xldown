@@ -77,6 +77,21 @@ The tool converts Excel workbooks to Markdown documents by:
 - Verifies `render_chart()` successfully renders each type
 - Includes helper `_update_chart_references()` to remap sheet names in chart formulas (openpyxl stores references like `'Data'!$B$1:$B$5`)
 
+**Test formatting pattern** — Use multi-line expected string format with exact markdown comparison for all Markdown output assertions:
+```python
+expected = """# Header
+
+## Table
+
+| Col1 | Col2 |
+|:-----|:-----|
+| val1 | val2 |
+
+"""
+assert content == expected
+```
+This ensures test output is explicit, reviewable, and matches actual formatting exactly (including spacing and alignment).
+
 ### Dependencies
 
 - **pandas** — Read Excel sheets to DataFrames
