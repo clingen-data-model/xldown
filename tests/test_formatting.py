@@ -66,5 +66,26 @@ def test_all_formatting_types(tmp_path: Path):
     excel_to_markdown(test_excel, output_dir)
 
     content = paths.output_file_path(output_dir).read_text()
-    expected = "# Formatting\n\n## Table\n\n| **Name**    | **Status**   |   **Value** |\n|:------------|:-------------|------------:|\n| **Alice**   | Active       |         100 |\n| *Bob*       | Inactive     |          50 |\n| ~~Charlie~~ | Pending      |          75 |\n| ***Diana*** | Active       |         200 |\n| Eve         | Error        |           0 |\n| Frank       | Warning      |          25 |\n\n\n### Annotations\n\n- A6: fg_color=FFFF0000\n\n- B7: bg_color=FFFFFF00\n\n\n"
+    expected = """# Formatting
+
+## Table
+
+| **Name**    | **Status**   |   **Value** |
+|:------------|:-------------|------------:|
+| **Alice**   | Active       |         100 |
+| *Bob*       | Inactive     |          50 |
+| ~~Charlie~~ | Pending      |          75 |
+| ***Diana*** | Active       |         200 |
+| Eve         | Error        |           0 |
+| Frank       | Warning      |          25 |
+
+
+### Annotations
+
+- A6: fg_color=FFFF0000
+
+- B7: bg_color=FFFFFF00
+
+
+"""
     assert content == expected
