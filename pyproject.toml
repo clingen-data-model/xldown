@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "markitdownite"
+name = "xldown"
 version = "0.1.0"
 description = "Convert Excel files to Markdown"
 requires-python = ">=3.12"
@@ -17,14 +17,14 @@ dependencies = [
 ]
 
 [project.scripts]
-markitdownite = "markitdownite.cli:main"
+xldown = "xldown.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["markitdownite*"]
+include = ["xldown*"]
 
 [dependency-groups]
 dev = [

@@ -1,9 +1,9 @@
 from pathlib import Path
 from collections import defaultdict
 
-from markitdownite import paths
-from markitdownite.charts import render_chart
-from markitdownite.cells import CellFormatting, CellAnnotation, CellMetadata, SheetRegion, find_cell_regions, RegionKind, parse_cell_range, fill_merged_cells, group_annotation_ranges
+from xldown import paths
+from xldown.charts import render_chart
+from xldown.cells import CellFormatting, CellAnnotation, CellMetadata, SheetRegion, find_cell_regions, RegionKind, parse_cell_range, fill_merged_cells, group_annotation_ranges
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.cell.cell import Cell

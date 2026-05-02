@@ -21,15 +21,15 @@ uv run pytest tests/test_charts.py::test_all_charts_in_single_workbook -v  # Run
 
 **Lint and format:**
 ```bash
-ruff check markitdownite tests             # Check code style
-ruff format markitdownite tests            # Auto-format code
+ruff check xldown tests                    # Check code style
+ruff format xldown tests                   # Auto-format code
 ```
 
 **CLI usage:**
 ```bash
-uv run markitdownite input.xlsx                          # Convert and output to input.md
-uv run markitdownite input.xlsx -o report.md             # Explicit output path
-uv run markitdownite input.xlsx --image-dir assets/img   # Custom image directory
+uv run xldown input.xlsx                          # Convert and output to input.md
+uv run xldown input.xlsx -o report.md             # Explicit output path
+uv run xldown input.xlsx --image-dir assets/img   # Custom image directory
 ```
 
 ## Architecture

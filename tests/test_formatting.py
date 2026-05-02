@@ -7,8 +7,8 @@ from openpyxl.worksheet.hyperlink import Hyperlink
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
 
-from markitdownite.converter import excel_to_markdown
-from markitdownite import paths
+from xldown.converter import excel_to_markdown
+from xldown import paths
 
 
 def test_prose_before_table(tmp_path: Path):

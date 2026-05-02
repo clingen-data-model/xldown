@@ -4,8 +4,8 @@ from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference
 from openpyxl.drawing.image import Image as XLImage
 
-from markitdownite.converter import excel_to_markdown
-from markitdownite import paths
+from xldown.converter import excel_to_markdown
+from xldown import paths
 
 
 def test_chart_rendered_as_image(tmp_path: Path):

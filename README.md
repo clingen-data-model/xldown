@@ -1,19 +1,19 @@
-# markitdownite
+# xldown
 
 Convert Excel (`.xlsx`) files to Markdown.
 
 ## Install
 
 ```bash
-pip install -e /path/to/markitdownite
+pip install -e /path/to/xldown
 ```
 
 ## CLI
 
 ```bash
-markitdownite input.xlsx              # creates input_output/ folder
-markitdownite input.xlsx -o my_report # creates my_report/ folder
-markitdownite --help
+xldown input.xlsx              # creates input_output/ folder
+xldown input.xlsx -o my_report # creates my_report/ folder
+xldown --help
 ```
 
 Output folder structure:
@@ -27,7 +27,7 @@ my_report/
 ## Python API
 
 ```python
-from markitdownite import excel_to_markdown
+from xldown import excel_to_markdown
 
 excel_to_markdown("data.xlsx", "my_report/")
 ```

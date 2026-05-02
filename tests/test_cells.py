@@ -1,6 +1,6 @@
 from openpyxl import Workbook
 from openpyxl.styles import Font
-from markitdownite.cells import find_cell_regions, RegionKind, fill_merged_cells, CellAnnotation, group_annotation_ranges
+from xldown.cells import find_cell_regions, RegionKind, fill_merged_cells, CellAnnotation, group_annotation_ranges
 
 
 def test_find_cell_regions():

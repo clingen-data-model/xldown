@@ -2,8 +2,8 @@ from pathlib import Path
 
 from openpyxl import Workbook
 
-from markitdownite.converter import excel_to_markdown
-from markitdownite import paths
+from xldown.converter import excel_to_markdown
+from xldown import paths
 
 
 def test_merged_cells_horizontal(tmp_path: Path):

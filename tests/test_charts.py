@@ -25,7 +25,7 @@ from openpyxl.chart import (
     SurfaceChart3D,
 )
 
-from markitdownite.converter import render_chart
+from xldown.converter import render_chart
 
 # ---------------------------------------------------------------------------
 # Constants

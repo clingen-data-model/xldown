@@ -2,7 +2,7 @@ from pathlib import Path
 
 import click
 
-from markitdownite.converter import excel_to_markdown
+from xldown.converter import excel_to_markdown
 
 
 @click.command()

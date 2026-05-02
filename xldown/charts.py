@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Union
 
 import matplotlib
-from markitdownite import paths
+from xldown import paths
 from openpyxl import Workbook
 from openpyxl.chart import (
     AreaChart,
