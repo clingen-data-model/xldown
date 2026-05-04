@@ -6,7 +6,17 @@ build-backend = "setuptools.build_meta"
 name = "xldown"
 version = "0.1.0"
 description = "Convert Excel files to Markdown"
+readme = "README.md"
 requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [{name = "Benjamin Blankenmeister", email = "bblanken@broadinstitute.org"}]
+keywords = ["excel", "markdown", "conversion"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
 dependencies = [
     "pandas>=2.0",
     "openpyxl>=3.1",

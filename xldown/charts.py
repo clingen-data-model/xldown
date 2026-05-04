@@ -116,6 +116,8 @@ def _series_label(workbook: Workbook, series: Series) -> str | None:
 
 
 def _render_bar(workbook: Workbook, chart: ChartType, ax) -> bool:
+    # Flow: Extract grouping/orientation → collect series data and categories → pad series to same length
+    # → apply percent-stacking if needed → draw each series as bars → return True if any data plotted
     grouping = getattr(chart, "grouping", "clustered") or "clustered"
     horizontal = getattr(chart, "type", "col") == "bar"
     stacked = grouping in ("stacked", "percentStacked")
@@ -169,6 +171,7 @@ def _render_bar(workbook: Workbook, chart: ChartType, ax) -> bool:
 
 
 def _render_line(workbook: Workbook, chart: ChartType, ax) -> bool:
+    # Flow: For each series, extract Y values → extract or generate X values → plot line with markers
     plotted = False
     for series in chart.series:
         y = _numeric(_read_ref(workbook, getattr(series, "val", None)))
@@ -183,6 +186,8 @@ def _render_line(workbook: Workbook, chart: ChartType, ax) -> bool:
 
 
 def _render_pie(workbook: Workbook, chart: ChartType, ax) -> bool:
+    # Flow: Iterate series until one has data → extract Y values and optional labels → draw pie with percentages
+    # Note: Only first series is rendered (pie charts don't support multiple series)
     for series in chart.series:
         y = _numeric(_read_ref(workbook, getattr(series, "val", None)))
         x = _read_ref(workbook, getattr(series, "cat", None))
@@ -196,6 +201,8 @@ def _render_pie(workbook: Workbook, chart: ChartType, ax) -> bool:
 
 
 def _render_doughnut(workbook: Workbook, chart: ChartType, ax) -> bool:
+    # Flow: Extract hole size → iterate series until one has data → draw pie with hollow center via wedgeprops
+    # Note: Only first series is rendered (doughnut charts don't support multiple series)
     hole = (getattr(chart, "holeSize", 50) or 50) / 100
     for series in chart.series:
         y = _numeric(_read_ref(workbook, getattr(series, "val", None)))
@@ -210,6 +217,8 @@ def _render_doughnut(workbook: Workbook, chart: ChartType, ax) -> bool:
 
 
 def _render_area(workbook: Workbook, chart: ChartType, ax) -> bool:
+    # Flow: Extract grouping → collect series data and categories → pad series to same length
+    # → apply percent-stacking if needed → draw stacked areas or overlapping filled areas
     grouping = getattr(chart, "grouping", "standard") or "standard"
     stacked = grouping in ("stacked", "percentStacked")
     pct = grouping == "percentStacked"
@@ -253,6 +262,7 @@ def _render_area(workbook: Workbook, chart: ChartType, ax) -> bool:
 
 
 def _render_scatter(workbook: Workbook, chart: ChartType, ax) -> bool:
+    # Flow: For each series, extract X and Y values → match lengths by taking minimum → plot as scatter or line
     style = getattr(chart, "scatterStyle", "marker") or "marker"
     plotted = False
     for series in chart.series:
@@ -271,6 +281,8 @@ def _render_scatter(workbook: Workbook, chart: ChartType, ax) -> bool:
 
 
 def _render_bubble(workbook: Workbook, chart: ChartType, ax) -> bool:
+    # Flow: For each series, extract X, Y, and optional bubble size values → match lengths
+    # → normalize bubble sizes or use uniform size → plot as scatter with sized markers
     plotted = False
     for series in chart.series:
         x = _numeric(_read_ref(workbook, getattr(series, "xVal", None)))
@@ -291,6 +303,8 @@ def _render_bubble(workbook: Workbook, chart: ChartType, ax) -> bool:
 
 
 def _render_radar(workbook: Workbook, chart: ChartType, ax) -> bool:
+    # Flow: Extract filled/standard type → for each series, extract Y values → compute angular positions
+    # → close the path by repeating first point → plot/fill on polar axes with optional category labels
     filled = getattr(chart, "type", "standard") == "filled"
     cats: list | None = None
     plotted = False
@@ -317,6 +331,8 @@ def _render_radar(workbook: Workbook, chart: ChartType, ax) -> bool:
 
 
 def _render_stock(workbook: Workbook, chart: ChartType, ax) -> bool:
+    # Flow: Extract series in order (Open, High, Low, Close) → draw vertical lines for High-Low range
+    # → draw colored bars for Open-Close spread (green if close ≥ open, red otherwise) → add category labels
     # Series order: Open, High, Low, Close (by append order in workbook)
     series_data: list[list] = []
     cats: list | None = None
@@ -366,6 +382,8 @@ def _render_stock(workbook: Workbook, chart: ChartType, ax) -> bool:
 
 
 def _render_surface(workbook: Workbook, chart: ChartType, ax) -> bool:
+    # Flow: Collect all series as rows of Z values → pad ragged rows → create 2D meshgrid for X/Y
+    # → plot 3D surface or 2D contour with colormap based on chart type
     import numpy as np
 
     rows: list[list] = []
@@ -397,37 +415,39 @@ def _render_surface(workbook: Workbook, chart: ChartType, ax) -> bool:
 
 def render_chart(workbook: Workbook, chart: ChartType, output_path: Path) -> bool:
     """Render an openpyxl chart to a PNG using matplotlib. Returns True if data was plotted."""
-    if isinstance(chart, SurfaceChart3D):
-        fig = plt.figure(figsize=(8, 6))
-        ax = fig.add_subplot(111, projection="3d")
-    elif isinstance(chart, RadarChart):
-        fig = plt.figure(figsize=(6, 6))
-        ax = fig.add_subplot(111, projection="polar")
-    else:
-        fig, ax = plt.subplots(figsize=(8, 5))
+    fig = plt.figure(figsize=(8, 5))
+
+    match chart:
+        case SurfaceChart3D():
+            # SurfaceChart3D renders as a true 3D surface; others render as 2D
+            ax = fig.add_subplot(111, projection="3d")
+        case RadarChart():
+            ax = fig.add_subplot(111, projection="polar")
+        case _:
+            ax = fig.add_subplot(111)
 
     plotted = False
-
-    if isinstance(chart, (BarChart, BarChart3D)):
-        plotted = _render_bar(workbook, chart, ax)
-    elif isinstance(chart, (LineChart, LineChart3D)):
-        plotted = _render_line(workbook, chart, ax)
-    elif isinstance(chart, (PieChart, PieChart3D, ProjectedPieChart)):
-        plotted = _render_pie(workbook, chart, ax)
-    elif isinstance(chart, DoughnutChart):
-        plotted = _render_doughnut(workbook, chart, ax)
-    elif isinstance(chart, (AreaChart, AreaChart3D)):
-        plotted = _render_area(workbook, chart, ax)
-    elif isinstance(chart, ScatterChart):
-        plotted = _render_scatter(workbook, chart, ax)
-    elif isinstance(chart, BubbleChart):
-        plotted = _render_bubble(workbook, chart, ax)
-    elif isinstance(chart, RadarChart):
-        plotted = _render_radar(workbook, chart, ax)
-    elif isinstance(chart, StockChart):
-        plotted = _render_stock(workbook, chart, ax)
-    elif isinstance(chart, (SurfaceChart, SurfaceChart3D)):
-        plotted = _render_surface(workbook, chart, ax)
+    match chart:
+        case BarChart() | BarChart3D():
+            plotted = _render_bar(workbook, chart, ax)
+        case LineChart() | LineChart3D():
+            plotted = _render_line(workbook, chart, ax)
+        case PieChart() | PieChart3D() | ProjectedPieChart():
+            plotted = _render_pie(workbook, chart, ax)
+        case DoughnutChart():
+            plotted = _render_doughnut(workbook, chart, ax)
+        case AreaChart() | AreaChart3D():
+            plotted = _render_area(workbook, chart, ax)
+        case ScatterChart():
+            plotted = _render_scatter(workbook, chart, ax)
+        case BubbleChart():
+            plotted = _render_bubble(workbook, chart, ax)
+        case RadarChart():
+            plotted = _render_radar(workbook, chart, ax)
+        case StockChart():
+            plotted = _render_stock(workbook, chart, ax)
+        case SurfaceChart() | SurfaceChart3D():
+            plotted = _render_surface(workbook, chart, ax)
 
     if plotted:
         try:
