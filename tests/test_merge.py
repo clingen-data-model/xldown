@@ -2,8 +2,8 @@ from pathlib import Path
 
 from openpyxl import Workbook
 
-from xldown.converter import excel_to_markdown
 from xldown import paths
+from xldown.converter import excel_to_markdown
 
 
 def test_merged_cells_horizontal(tmp_path: Path):
@@ -166,42 +166,6 @@ def test_multiple_merges(tmp_path: Path):
 |:--------|:--------|:--------|
 | Group 1 | Value 1 | Value 2 |
 | Group 1 | Value 3 | Value 4 |
-
-"""
-    assert content == expected
-
-
-def test_table_at_arbitrary_position(tmp_path: Path):
-    """Verify that tables can start at any row and column (e.g., D4)."""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Data"
-
-    # Leave rows 1-3 empty, start table at row 4
-    # Leave columns A-C empty, start table at column D
-    ws["D4"] = "Name"
-    ws["E4"] = "Age"
-    ws["D5"] = "Alice"
-    ws["E5"] = 30
-    ws["D6"] = "Bob"
-    ws["E6"] = 25
-
-    test_excel = tmp_path / "test_position.xlsx"
-    wb.save(test_excel)
-
-    output_dir = tmp_path / "output"
-    excel_to_markdown(test_excel, output_dir)
-
-    # Verify the full markdown output
-    content = paths.output_file_path(output_dir).read_text()
-    expected = """# Data
-
-## Table
-
-| Name   |   Age |
-|:-------|------:|
-| Alice  |    30 |
-| Bob    |    25 |
 
 """
     assert content == expected

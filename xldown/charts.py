@@ -1,9 +1,7 @@
 import math
 from pathlib import Path
-from typing import Union
 
 import matplotlib
-from xldown import paths
 from openpyxl import Workbook
 from openpyxl.chart import (
     AreaChart,
@@ -28,24 +26,24 @@ from openpyxl.chart import (
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-ChartType = Union[
-    BarChart,
-    BarChart3D,
-    LineChart,
-    LineChart3D,
-    PieChart,
-    PieChart3D,
-    ProjectedPieChart,
-    DoughnutChart,
-    AreaChart,
-    AreaChart3D,
-    ScatterChart,
-    BubbleChart,
-    RadarChart,
-    StockChart,
-    SurfaceChart,
-    SurfaceChart3D,
-]
+ChartType = (
+    BarChart
+    | BarChart3D
+    | LineChart
+    | LineChart3D
+    | PieChart
+    | PieChart3D
+    | ProjectedPieChart
+    | DoughnutChart
+    | AreaChart
+    | AreaChart3D
+    | ScatterChart
+    | BubbleChart
+    | RadarChart
+    | StockChart
+    | SurfaceChart
+    | SurfaceChart3D
+)
 
 # ---------------------------------------------------------------------------
 # Cell-range helpers

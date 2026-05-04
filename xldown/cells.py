@@ -1,10 +1,11 @@
+import re
 from collections import defaultdict
 from enum import StrEnum
-import re
-from pydantic import BaseModel, ConfigDict
+
 from openpyxl.cell.cell import Cell
 from openpyxl.cell.rich_text import CellRichText
 from openpyxl.utils import column_index_from_string, get_column_letter
+from pydantic import BaseModel, ConfigDict
 
 
 class RegionKind(StrEnum):

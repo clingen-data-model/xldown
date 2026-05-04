@@ -1,16 +1,21 @@
 from pathlib import Path
-from collections import defaultdict
 
-from xldown import paths
-from xldown.charts import render_chart
-from xldown.cells import CellFormatting, CellAnnotation, CellMetadata, SheetRegion, find_cell_regions, RegionKind, parse_cell_range, fill_merged_cells, group_annotation_ranges
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.cell.cell import Cell
-from openpyxl.utils import get_column_letter, column_index_from_string
-from pydantic import BaseModel, ConfigDict
-import re
+from openpyxl.utils import column_index_from_string, get_column_letter
 
+from xldown import paths
+from xldown.cells import (
+    CellAnnotation,
+    CellFormatting,
+    CellMetadata,
+    RegionKind,
+    fill_merged_cells,
+    find_cell_regions,
+    group_annotation_ranges,
+)
+from xldown.charts import render_chart
 
 
 def read_sheet(
