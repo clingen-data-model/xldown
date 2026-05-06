@@ -59,21 +59,17 @@ def _read_cell_range(workbook: Workbook, range_str: str) -> list:
     sheet_name = sheet_part.strip("'")
     try:
         ws = workbook[sheet_name]
-    except KeyError:
-        return []
-    values: list = []
-    try:
         cells = ws[cell_range]
-        if not isinstance(cells, tuple):
-            cells = (cells,)
-        for row in cells:
-            if not isinstance(row, tuple):
-                row = (row,)
-            for cell in row:
-                if cell.value is not None:
-                    values.append(cell.value)
-    except Exception:
-        pass
+    except (KeyError, Exception):
+        return []
+
+    values = []
+    rows = cells if isinstance(cells, tuple) else (cells,)
+    for row in rows:
+        cells_in_row = row if isinstance(row, tuple) else (row,)
+        for cell in cells_in_row:
+            if cell.value is not None:
+                values.append(cell.value)
     return values
 
 
