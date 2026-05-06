@@ -92,11 +92,12 @@ class CellAnnotation(BaseModel):
     fg_color: str | None = None
     bg_color: str | None = None
     border: str | None = None
+    formula: str | None = None
     category: str | None = None
 
     @classmethod
-    def from_cell(cls, cell: Cell) -> "CellAnnotation":
-        """Extract formatting annotations (colors, borders) from a cell."""
+    def from_cell(cls, cell: Cell, formula: str | None = None) -> "CellAnnotation":
+        """Extract formatting annotations (colors, borders, formula) from a cell."""
         font = cell.font or {}
         fill = cell.fill or {}
         border = cell.border or {}
@@ -121,6 +122,7 @@ class CellAnnotation(BaseModel):
             fg_color=fg_color,
             bg_color=bg_color,
             border=border_style,
+            formula=formula,
         )
 
 
