@@ -19,7 +19,7 @@ from xldown.charts import render_chart
 
 
 def read_sheet(
-    xlsx_path: Path, sheet_name: str, ws
+    xlsx_path: Path, sheet_name: str, ws, formula_ws=None
 ) -> list[tuple[RegionKind, pd.DataFrame | str, dict[tuple[int, int], CellAnnotation], dict[tuple[int, int], CellMetadata], set[str]]]:
     """Read Excel sheet and decompose into tables and prose.
 
@@ -30,6 +30,12 @@ def read_sheet(
     - PROSE: single isolated cell (returned as plain text)
     - TABLE: multi-cell region (first row = headers, returned as DataFrame)
 
+    Args:
+        xlsx_path: Path to the Excel file (unused but kept for compatibility)
+        sheet_name: Name of the sheet being read
+        ws: Worksheet object with data_only=True
+        formula_ws: Optional worksheet object with data_only=False for extracting formulas
+
     Returns list of tuples: (kind, content, annotations, metadata, hidden_columns) where:
     - kind: RegionKind.PROSE or RegionKind.TABLE
     - content: str for prose, pd.DataFrame for table
@@ -39,11 +45,24 @@ def read_sheet(
     # Phase 1: Extract raw values and cell objects from worksheet.
     # Each row's list only contains cells up to the last non-empty cell in that row,
     # so rows may have different lengths and need padding later.
+    # Collect formulas keyed by (row_idx, col_idx) if formula_ws is provided.
     data: list[list[str | int | float | bool | None]] = []
     cell_objects: list[list[Cell]] = []
-    for row_idx, row in enumerate(ws.iter_rows(values_only=False), 1):
+    cell_formulas: dict[tuple[int, int], str] = {}
+
+    if formula_ws:
+        rows_iter = zip(ws.iter_rows(values_only=False), formula_ws.iter_rows(values_only=False))
+    else:
+        rows_iter = ((row, None) for row in ws.iter_rows(values_only=False))
+
+    for row_idx, (row, formula_row) in enumerate(rows_iter):
         data.append([cell.value for cell in row])
-        cell_objects.append(list(row))
+        cells = list(row)
+        if formula_row:
+            for col_idx, (cell, formula_cell) in enumerate(zip(cells, formula_row)):
+                if formula_cell.value and isinstance(formula_cell.value, str) and formula_cell.value.startswith("="):
+                    cell_formulas[(row_idx, col_idx)] = formula_cell.value
+        cell_objects.append(cells)
 
     if not data:
         return []
@@ -106,8 +125,8 @@ def read_sheet(
                         data_row = row_idx - region.min_row + 1
                         data_col = col_idx - region.min_col + 1
 
-                        annotation = CellAnnotation.from_cell(cell)
-                        if annotation.fg_color or annotation.bg_color or annotation.border:
+                        annotation = CellAnnotation.from_cell(cell, formula=cell_formulas.get((row_idx, col_idx)))
+                        if annotation.fg_color or annotation.bg_color or annotation.border or annotation.formula:
                             annotations[(data_row, data_col)] = annotation
 
                         cell_metadata = CellMetadata.from_cell(cell)
@@ -166,6 +185,7 @@ def excel_to_markdown(
     images_dir.mkdir(parents=True, exist_ok=True)
 
     wb = load_workbook(xlsx_path, data_only=True, rich_text=True)
+    wb_formulas = load_workbook(xlsx_path, data_only=False, rich_text=True)
 
     md_parts: list[str] = []
     chart_counter = 0
@@ -173,7 +193,8 @@ def excel_to_markdown(
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        regions = read_sheet(xlsx_path, sheet_name, ws)
+        formula_ws = wb_formulas[sheet_name]
+        regions = read_sheet(xlsx_path, sheet_name, ws, formula_ws=formula_ws)
 
         md_parts.append(f"# {sheet_name}\n")
 
@@ -205,6 +226,8 @@ def excel_to_markdown(
                         parts.append(f"bg_color={annotation.bg_color}")
                     if annotation.border:
                         parts.append(f"border={annotation.border}")
+                    if annotation.formula:
+                        parts.append(f"formula={annotation.formula}")
                     if parts:
                         md_parts.append(f"- {range_str}: {' '.join(parts)}\n")
 
