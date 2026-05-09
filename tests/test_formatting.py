@@ -112,30 +112,36 @@ def test_all_formatting_types(tmp_path: Path):
     ws["B1"].font = Font(bold=True)
     ws["C1"] = "Value"
     ws["C1"].font = Font(bold=True)
+    ws["D1"] = "Double"
+    ws["D1"].font = Font(bold=True)
 
     # Bold text
     ws["A2"] = "Alice"
     ws["A2"].font = Font(bold=True)
     ws["B2"] = "Active"
     ws["C2"] = 100
+    ws["D2"] = "=SUM($A$1)"
 
     # Italic text
     ws["A3"] = "Bob"
     ws["A3"].font = Font(italic=True)
     ws["B3"] = "Inactive"
     ws["C3"] = 50
+    ws["D3"] = "=SUM($A$1)"
 
     # Strikethrough text
     ws["A4"] = "Charlie"
     ws["A4"].font = Font(strikethrough=True)
     ws["B4"] = "Pending"
     ws["C4"] = 75
+    ws["D4"] = "=SUM($A$1)"
 
     # Bold + Italic
     ws["A5"] = "Diana"
     ws["A5"].font = Font(bold=True, italic=True)
     ws["B5"] = "Active"
     ws["C5"] = 200
+    ws["D5"] = "=SUM($A$1)"
 
     # Red text (annotation) with comment
     ws["A6"] = "Eve"
@@ -207,24 +213,26 @@ def test_all_formatting_types(tmp_path: Path):
 
 ## Table
 
-| **Name**           | **Status** (hidden)   | **Value**   |
-|:-------------------|:----------------------|:------------|
-| **Alice**          | Active                | 100         |
-| *Bob*              | Inactive              | 50          |
-| ~~Charlie~~        | Pending               | 75          |
-| ***Diana***        | Active                | 200         |
-| Eve                | Error                 | 0           |
-| Frank              | Warning               | 25          |
-| <sub>H2O</sub>     | Normal                | 200         |
-| H2O                | H<sub>2</sub>O        | 100         |
-| Rotated 90° (↻90°) | Normal                | 300         |
-| Grace              | OK                    | 10          |
-| left               | apex                  | right       |
+| **Name**           | **Status** (hidden)   | **Value**   | **Double**   |
+|:-------------------|:----------------------|:------------|:-------------|
+| **Alice**          | Active                | 100         |              |
+| *Bob*              | Inactive              | 50          |              |
+| ~~Charlie~~        | Pending               | 75          |              |
+| ***Diana***        | Active                | 200         |              |
+| Eve                | Error                 | 0           |              |
+| Frank              | Warning               | 25          |              |
+| <sub>H2O</sub>     | Normal                | 200         |              |
+| H2O                | H<sub>2</sub>O        | 100         |              |
+| Rotated 90° (↻90°) | Normal                | 300         |              |
+| Grace              | OK                    | 10          |              |
+| left               | apex                  | right       |              |
 
 ### Annotations
 *(Cell references are relative to the table above)*
 
 - B1:B10: bg_color=FFFFFF00
+
+- D2:D5: formula==SUM($A$1)
 
 - A6: fg_color=FFFF0000
 

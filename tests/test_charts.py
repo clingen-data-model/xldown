@@ -3,6 +3,7 @@
 import re
 from pathlib import Path
 
+import numpy as np
 import openpyxl
 from openpyxl.chart import (
     AreaChart,
@@ -24,6 +25,7 @@ from openpyxl.chart import (
     SurfaceChart,
     SurfaceChart3D,
 )
+from PIL import Image
 
 from xldown.converter import render_chart
 
@@ -329,6 +331,28 @@ def make_surface3d():
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _compare_images(generated_path, expected_path):
+    """Compare two PNG images pixel-by-pixel using numpy arrays.
+
+    Returns None if images are identical, or an error message if they differ.
+    """
+    generated_array = np.array(Image.open(generated_path))
+    expected_array = np.array(Image.open(expected_path))
+
+    if generated_array.shape != expected_array.shape:
+        return f"Different dimensions: {generated_array.shape} vs {expected_array.shape}"
+
+    if np.any(generated_array != expected_array):
+        return "Pixel values differ"
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Parametrized test
 # ---------------------------------------------------------------------------
 
@@ -387,9 +411,6 @@ def test_chart_images_match_fixtures(tmp_path: Path):
         result = render_chart(wb, chart, output_path)
         assert result, f"{name} ({i}): render_chart returned False"
 
-        with open(output_path, "rb") as f:
-            generated = f.read()
-        with open(fixtures_dir / f"{i}.png", "rb") as f:
-            expected = f.read()
-
-        assert generated == expected, f"{name} ({i}): Generated image differs from fixture"
+        fixture_path = fixtures_dir / f"{i}.png"
+        error = _compare_images(output_path, fixture_path)
+        assert error is None, f"{name} ({i}): {error}"
