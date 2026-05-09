@@ -1,5 +1,8 @@
 # xldown
 
+[![PyPI](https://img.shields.io/pypi/v/xldown.svg)](https://pypi.org/project/xldown/)
+[![Tests](https://github.com/clingen-data-model/xldown/workflows/Tests/badge.svg)](https://github.com/clingen-data-model/xldown/actions)
+
 Convert Excel (`.xlsx`) files to Markdown.
 
 ## Install
