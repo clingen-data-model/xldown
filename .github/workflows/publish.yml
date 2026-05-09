@@ -58,11 +58,10 @@ jobs:
             **/pyproject.toml
 
       - name: Install dependencies
-        run: uv sync --locked --python-preference=system --group dev
+        run: uv pip install -e ".[dev]" --system
 
       - name: Run tests
         run: uv run pytest
-
   publish:
     needs: [check-version, test]
     if: github.event_name == 'release' || (github.event_name == 'push' && needs.check-version.outputs.version-changed == 'true')
