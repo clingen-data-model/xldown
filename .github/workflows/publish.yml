@@ -1,11 +1,45 @@
 name: Publish to PyPI
 
 on:
+  push:
+    branches:
+      - main
   release:
     types: [published]
 
 jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version-changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if version was bumped
+        id: check
+        run: |
+          CURRENT_VERSION=$(grep '^version = ' pyproject.toml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous tags found, version changed"
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            LAST_VERSION=${LAST_TAG#v}
+            if [ "$CURRENT_VERSION" != "$LAST_VERSION" ]; then
+              echo "Version changed from $LAST_VERSION to $CURRENT_VERSION"
+              echo "changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "Version unchanged at $CURRENT_VERSION"
+              echo "changed=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
   test:
+    if: github.event_name == 'release' || (github.event_name == 'push' && needs.check-version.outputs.version-changed == 'true')
+    needs: check-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +64,8 @@ jobs:
         run: uv run pytest
 
   publish:
-    needs: test
+    needs: [check-version, test]
+    if: github.event_name == 'release' || (github.event_name == 'push' && needs.check-version.outputs.version-changed == 'true')
     runs-on: ubuntu-latest
     environment: release
     permissions:
