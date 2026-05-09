@@ -69,6 +69,7 @@ jobs:
     environment: release
     permissions:
       id-token: write
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -90,3 +91,12 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Create and push git tag
+        run: |
+          VERSION=$(grep '^version = ' pyproject.toml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          TAG="v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release version $VERSION" ${{ github.sha }}
+          git push origin "$TAG"
