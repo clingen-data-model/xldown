@@ -1,8 +1,11 @@
 from openpyxl import Workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 from openpyxl.styles import Font
 
 from xldown.cells import (
     CellAnnotation,
+    CellFormatting,
     RegionKind,
     fill_merged_cells,
     find_cell_regions,
@@ -117,3 +120,13 @@ def test_group_annotation_ranges():
     assert ranges[0] == ("A1:B1", annot)
     # Second cluster (solid 1x2, sorted after)
     assert ranges[1] == ("D3:E3", annot2)
+
+
+def test_format_rich_text_with_plain_string_blocks():
+    """CellRichText may contain bare strings alongside TextBlocks."""
+    ws = Workbook().active
+    ws["A1"] = CellRichText("H", TextBlock(InlineFont(vertAlign="subscript"), "2"), "O")
+    ws["A2"] = CellRichText("plain only")
+
+    assert CellFormatting.format_rich_text(ws["A1"]) == "H<sub>2</sub>O"
+    assert CellFormatting.format_rich_text(ws["A2"]) == "plain only"

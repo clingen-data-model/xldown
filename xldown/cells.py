@@ -53,10 +53,11 @@ class CellFormatting(BaseModel):
         if isinstance(cell.value, CellRichText):
             result = ""
             for block in cell.value:
-                text = block.text
-                if block.font and block.font.vertAlign == "subscript":
+                text = block if isinstance(block, str) else block.text
+                font = None if isinstance(block, str) else block.font
+                if font and font.vertAlign == "subscript":
                     result += f"<sub>{text}</sub>"
-                elif block.font and block.font.vertAlign == "superscript":
+                elif font and font.vertAlign == "superscript":
                     result += f"<sup>{text}</sup>"
                 else:
                     result += text
