@@ -30,3 +30,12 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+
+      - name: TEMP dump chart renders
+        run: uv run python -m tests._dump_charts
+
+      - name: TEMP upload chart renders
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-charts
+          path: ci-charts/
