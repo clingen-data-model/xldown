@@ -335,20 +335,15 @@ def make_surface3d():
 # ---------------------------------------------------------------------------
 
 
-# Fixtures are rendered on one machine but compared on others (CI runners,
-# contributor laptops), where font stacks and matplotlib backends differ enough
-# to shift antialiasing and glyph shapes. Compare with tolerance instead of
-# exact equality: small differences everywhere are fine, and a bounded fraction
-# of pixels may differ noticeably, but a genuinely wrong chart moves both.
-MAX_MEAN_ABS_DIFF = 0.0  # average channel difference, 0-255 scale
-DIFF_PIXEL_THRESHOLD = 32  # a channel differing by more than this is "noticeable"
-MAX_DIFF_PIXEL_FRACTION = 0.0  # at most 3% of pixels may differ noticeably
-
-
 def _compare_images(generated_path, expected_path):
-    """Compare two PNG images with tolerance for platform rendering differences.
+    """Compare two PNG images pixel-by-pixel using numpy arrays.
 
-    Returns None if the images match within tolerance, or an error message.
+    Renders are reproducible as long as CI installs the locked dependency
+    versions (matplotlib in particular changes chart layout between minor
+    releases), so this is an exact comparison. The diff magnitude is reported
+    on failure to distinguish a real regression from rendering drift.
+
+    Returns None if images are identical, or an error message if they differ.
     """
     generated_array = np.array(Image.open(generated_path).convert("RGBA"), dtype=np.int16)
     expected_array = np.array(Image.open(expected_path).convert("RGBA"), dtype=np.int16)
@@ -357,15 +352,10 @@ def _compare_images(generated_path, expected_path):
         return f"Different dimensions: {generated_array.shape} vs {expected_array.shape}"
 
     diff = np.abs(generated_array - expected_array)
-    mean_abs_diff = float(diff.mean())
-    diff_pixel_fraction = float((diff.max(axis=2) > DIFF_PIXEL_THRESHOLD).mean())
-
-    if mean_abs_diff > MAX_MEAN_ABS_DIFF or diff_pixel_fraction > MAX_DIFF_PIXEL_FRACTION:
+    if diff.any():
         return (
-            f"Pixel values differ: mean abs diff {mean_abs_diff:.2f} "
-            f"(max {MAX_MEAN_ABS_DIFF}), "
-            f"{diff_pixel_fraction:.1%} of pixels differ noticeably "
-            f"(max {MAX_DIFF_PIXEL_FRACTION:.0%})"
+            f"Pixel values differ: mean abs diff {diff.mean():.2f}, "
+            f"{(diff.max(axis=2) > 32).mean():.1%} of pixels differ noticeably"
         )
 
     return None
