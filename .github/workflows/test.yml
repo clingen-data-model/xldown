@@ -32,9 +32,11 @@ jobs:
         run: uv run pytest
 
       - name: TEMP dump chart renders
+        if: always()
         run: uv run python -m tests._dump_charts
 
       - name: TEMP upload chart renders
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ci-charts
